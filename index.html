@@ -382,6 +382,9 @@
           <div style="margin-top: 6px; color: var(--yellow);">
             Tip: Destroy red formations for Power Capsules!
           </div>
+          <div style="margin-top: 4px; color: var(--cyan); font-size: 7.5px;">
+            Secret: ↑ ↑ ↓ ↓ ← → ← → B A (Full Power-Up)
+          </div>
         </div>
       </div>
     </div>
@@ -686,6 +689,35 @@ function handleKey(code, pressed) {
     const isMuted = sound.toggleMute();
     game.addFloatingText(isMuted ? "SOUND: OFF" : "SOUND: ON", 60, 40, '#ffcc00');
   }
+
+  // Konami Code Detection
+  if (pressed) {
+    checkKonamiCode(code);
+  }
+}
+
+const konamiSequences = [
+  ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA'],
+  ['KeyW', 'KeyW', 'KeyS', 'KeyS', 'KeyA', 'KeyD', 'KeyA', 'KeyD', 'KeyB', 'KeyA'],
+  ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyX', 'KeyZ']
+];
+let konamiBuffer = [];
+
+function checkKonamiCode(code) {
+  konamiBuffer.push(code);
+  if (konamiBuffer.length > 20) konamiBuffer.shift();
+
+  for (let seq of konamiSequences) {
+    if (konamiBuffer.length >= seq.length) {
+      const recent = konamiBuffer.slice(-seq.length);
+      const match = seq.every((val, idx) => val === recent[idx]);
+      if (match) {
+        konamiBuffer = [];
+        game.triggerKonamiCode();
+        break;
+      }
+    }
+  }
 }
 
 // Mobile Touch Setup
@@ -728,6 +760,9 @@ setupMobileBtn('m-power', 'power', true);
 
 class StarField {
   constructor() {
+    this.planetX = W + 100;
+    this.planetY = 120;
+    this.planetRadius = 45;
     this.layers = [
       { speed: 0.5, stars: [] },
       { speed: 1.2, stars: [] },
@@ -747,6 +782,12 @@ class StarField {
   }
 
   update() {
+    this.planetX -= 0.15;
+    if (this.planetX < -100) {
+      this.planetX = W + 150;
+      this.planetY = 80 + Math.random() * 120;
+    }
+
     for (let l = 0; l < 3; l++) {
       const layer = this.layers[l];
       for (let star of layer.stars) {
@@ -760,6 +801,26 @@ class StarField {
   }
 
   draw(ctx) {
+    // Distant Giant Red Planet
+    ctx.save();
+    const grad = ctx.createRadialGradient(
+      this.planetX - 12, this.planetY - 12, 5,
+      this.planetX, this.planetY, this.planetRadius
+    );
+    grad.addColorStop(0, '#e65c00');
+    grad.addColorStop(0.6, '#992200');
+    grad.addColorStop(1, '#330500');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(this.planetX, this.planetY, this.planetRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Planet atmosphere glow
+    ctx.strokeStyle = 'rgba(255, 120, 50, 0.25)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.restore();
+
     for (let l = 0; l < 3; l++) {
       const layer = this.layers[l];
       for (let star of layer.stars) {
@@ -1239,6 +1300,54 @@ class Particle {
   }
 }
 
+// Stage 1 Volcano Eruption Rock (Iconical Gradius Volcano debris)
+class VolcanoRock {
+  constructor(x, y, vx, vy) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.radius = 7 + Math.random() * 4;
+    this.alive = true;
+    this.rot = 0;
+    this.rotSpeed = (Math.random() - 0.5) * 0.2;
+    this.hp = 1;
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += 0.09; // Gravity pull downwards
+    this.rot += this.rotSpeed;
+
+    if (this.x < -30 || this.y > H + 20) {
+      this.alive = false;
+    }
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+
+    // Glowing hot volcanic boulder
+    ctx.fillStyle = '#cc3311';
+    ctx.strokeStyle = '#ff9900';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath();
+    ctx.arc(-2, -2, this.radius * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
 // Enemies
 class Enemy {
   constructor(type, x, y, options = {}) {
@@ -1250,6 +1359,7 @@ class Enemy {
     this.hp = options.hp || 1;
     this.maxHp = this.hp;
     this.isRed = options.isRed || false; // Drops capsule!
+    this.isBlue = options.isBlue || false; // Drops Blue capsule!
     this.timer = 0;
     this.w = 18;
     this.h = 16;
@@ -1298,7 +1408,7 @@ class Enemy {
     ctx.save();
     ctx.translate(this.x, this.y);
 
-    const baseColor = this.isRed ? '#ff2244' : '#ffaa00';
+    const baseColor = this.isBlue ? '#00e1ff' : (this.isRed ? '#ff2244' : '#ffaa00');
     const darkColor = this.isRed ? '#990011' : '#885500';
 
     if (this.type === 'fan') {
@@ -1526,12 +1636,17 @@ class GradiusGame {
     this.enemies = [];
     this.bullets = [];
     this.capsules = [];
+    this.volcanoRocks = [];
     this.particles = [];
     this.floatingTexts = [];
     this.boss = null;
 
     this.score = 0;
-    this.hiscore = 50000;
+    try {
+      this.hiscore = parseInt(localStorage.getItem('gradius_hiscore') || '50000', 10);
+    } catch(e) {
+      this.hiscore = 50000;
+    }
     this.lives = 3;
     this.stage = 1;
     this.worldDistance = 0;
@@ -1539,9 +1654,25 @@ class GradiusGame {
     this.state = 'TITLE'; // TITLE, PLAYING, GAMEOVER, STAGECLEAR
     this.bossSpawned = false;
     this.shakeTimer = 0;
+    this.screenFlashTimer = 0;
     this.isPaused = false;
 
     this.initEvents();
+  }
+
+  triggerKonamiCode() {
+    if (this.state !== 'PLAYING' || !this.player.alive) return;
+    this.player.speedLevel = 1;
+    this.player.hasMissile = true;
+    this.player.hasLaser = true;
+    this.player.hasDouble = false;
+    this.player.optionCount = 2;
+    this.player.shieldHP = 8;
+    this.player.meterIndex = -1;
+    this.updateHUD();
+    sound.powerUp();
+    setTimeout(() => sound.powerUp(), 130);
+    this.addFloatingText("★ KONAMI CODE! FULL POWER! ★", W / 2 - 130, H / 2 - 30, '#00ffff');
   }
 
   togglePause() {
@@ -1572,6 +1703,7 @@ class GradiusGame {
     this.enemies = [];
     this.bullets = [];
     this.capsules = [];
+    this.volcanoRocks = [];
     this.particles = [];
     this.floatingTexts = [];
     this.player.reset();
@@ -1679,6 +1811,9 @@ class GradiusGame {
     this.score += pts;
     if (this.score > this.hiscore) {
       this.hiscore = this.score;
+      try {
+        localStorage.setItem('gradius_hiscore', this.hiscore);
+      } catch(e) {}
     }
     this.updateHUD();
   }
@@ -1765,14 +1900,16 @@ class GradiusGame {
     // Pre-boss waves (Formation of red/yellow enemies)
     if (this.worldDistance < 2200) {
       if (this.worldDistance % 180 === 30) {
-        // Spawn 4-ship red formation (all drop 1 capsule on full extermination)
+        // Spawn 4-ship red formation (last one carries Capsule)
         const startY = 80 + Math.random() * 180;
+        const carriesBlue = Math.random() < 0.2; // 20% blue capsule!
         for (let i = 0; i < 4; i++) {
           setTimeout(() => {
             if (this.state === 'PLAYING') {
               this.spawnEnemy(new Enemy('fan', W + 20, startY, {
                 offset: i * 0.4,
-                isRed: i === 3 // Last one carries Red Capsule!
+                isRed: i === 3,
+                isBlue: i === 3 && carriesBlue
               }));
             }
           }, i * 220);
@@ -1785,6 +1922,15 @@ class GradiusGame {
       }
       if (this.worldDistance > 800 && this.worldDistance % 400 === 0) {
         this.spawnEnemy(new Enemy('hatch', W + 20, H - 40, { hp: 4 }));
+      }
+
+      // Stage 1 Volcano Eruption!
+      if (this.worldDistance > 1100 && this.worldDistance < 1650) {
+        if (this.worldDistance % 28 === 0) {
+          const vx = -1.5 - Math.random() * 2.5;
+          const vy = -4.5 - Math.random() * 2.8;
+          this.volcanoRocks.push(new VolcanoRock(W - 20, H - 70, vx, vy));
+        }
       }
     } 
     // Boss Arrival
@@ -1910,7 +2056,7 @@ class GradiusGame {
 
               // Drop Power Capsule!
               if (enemy.isRed) {
-                this.capsules.push(new Capsule(enemy.x, enemy.y));
+                this.capsules.push(new Capsule(enemy.x, enemy.y, enemy.isBlue));
               }
             }
             if (b.type !== 'laser') b.alive = false;
@@ -1940,6 +2086,46 @@ class GradiusGame {
       }
     }
 
+    // Update Volcano Rocks
+    for (let i = this.volcanoRocks.length - 1; i >= 0; i--) {
+      const rock = this.volcanoRocks[i];
+      rock.update();
+
+      // Check player bullet hits rock
+      for (let b of this.bullets) {
+        if (!b.alive || !b.fromPlayer) continue;
+        const dist = Math.hypot(b.x - rock.x, b.y - rock.y);
+        if (dist < rock.radius + 6) {
+          rock.alive = false;
+          if (b.type !== 'laser') b.alive = false;
+          this.addScore(100);
+          sound.explosion();
+          this.spawnExplosion(rock.x, rock.y, 8, '#ff7700');
+          break;
+        }
+      }
+
+      // Check player collision with rock
+      if (this.player.alive && rock.alive && this.player.invulnerableTimer <= 0) {
+        const dist = Math.hypot(this.player.x - rock.x, this.player.y - rock.y);
+        if (dist < rock.radius + 8) {
+          rock.alive = false;
+          if (this.player.shieldHP > 0) {
+            this.player.shieldHP -= 2;
+            sound.playTone(500, 'square', 0.05, 0.1);
+            this.spawnExplosion(rock.x, rock.y, 10, '#00f0ff');
+            this.updateHUD();
+          } else {
+            this.handlePlayerDeath();
+          }
+        }
+      }
+
+      if (!rock.alive) {
+        this.volcanoRocks.splice(i, 1);
+      }
+    }
+
     // Update Capsules
     for (let i = this.capsules.length - 1; i >= 0; i--) {
       const c = this.capsules[i];
@@ -1953,9 +2139,28 @@ class GradiusGame {
           sound.capsule();
           this.addScore(500);
 
-          // Cycle Power Up Meter (0 to 5)
-          this.player.meterIndex = (this.player.meterIndex + 1) % 6;
-          this.updateHUD();
+          if (c.isBlue) {
+            // Blue Capsule: Screen Bomb (Destroy all on-screen enemies & bullets!)
+            this.screenFlashTimer = 10;
+            sound.explosion();
+            for (let enemy of this.enemies) {
+              if (enemy.alive) {
+                enemy.alive = false;
+                this.addScore(200);
+                this.spawnExplosion(enemy.x, enemy.y, 16, '#00f0ff');
+              }
+            }
+            for (let rock of this.volcanoRocks) {
+              rock.alive = false;
+              this.spawnExplosion(rock.x, rock.y, 8, '#ff9900');
+            }
+            this.bullets = this.bullets.filter(b => b.fromPlayer); // Clear enemy bullets!
+            this.addFloatingText("DESTROY ALL ENEMIES!", W / 2 - 110, H / 2, '#00ffff');
+          } else {
+            // Red Capsule: Cycle Power Up Meter (0 to 5)
+            this.player.meterIndex = (this.player.meterIndex + 1) % 6;
+            this.updateHUD();
+          }
         }
       }
 
@@ -2016,6 +2221,9 @@ class GradiusGame {
       this.boss.draw(ctx);
     }
 
+    // Volcano Rocks
+    for (let r of this.volcanoRocks) r.draw(ctx);
+
     // Player
     this.player.draw(ctx);
 
@@ -2024,6 +2232,13 @@ class GradiusGame {
 
     // Floating Text
     for (let t of this.floatingTexts) t.draw(ctx);
+
+    // Screen Flash (Blue Capsule Bomb)
+    if (this.screenFlashTimer > 0) {
+      this.screenFlashTimer--;
+      ctx.fillStyle = `rgba(255, 255, 255, ${this.screenFlashTimer / 10})`;
+      ctx.fillRect(0, 0, W, H);
+    }
 
     // Pause Overlay
     if (this.isPaused) {
